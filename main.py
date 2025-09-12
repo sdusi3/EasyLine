@@ -1,65 +1,54 @@
 import cv2
 import time
 import csv
+import os
+import pandas as pd
+import streamlit as st
 from ultralytics import YOLO
+from streamlit_autorefresh import st_autorefresh
 
 # -----------------------------
-# 1. Load YOLOv8 Model
+# Settings
 # -----------------------------
-model = YOLO("yolov8n.pt")  # 'n' = nano version, fast for snapshots
-
-# -----------------------------
-# 2. Connect to Camera
-# -----------------------------
-cap = cv2.VideoCapture(0)  # 0 = default webcam; replace with RTSP/URL if IP camera
-
-# -----------------------------
-# 3. Set Snapshot Interval
-# -----------------------------
-snapshot_interval = 5  # seconds between snapshots
-
-# -----------------------------
-# 4. CSV Setup
-# -----------------------------
+snapshot_interval = 2  # seconds between snapshots
 csv_filename = "queue_log.csv"
 
-# Create CSV and write header if file doesn't exist
-with open(csv_filename, mode='w', newline='') as file:
-    writer = csv.writer(file)
-    writer.writerow(["Timestamp", "People_in_Line"])
+# -----------------------------
+# Initialize YOLO model
+# -----------------------------
+model = YOLO("yolov8n.pt")
 
 # -----------------------------
-# 5. Run Loop
+# Setup Streamlit
 # -----------------------------
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        print("Failed to grab frame")
-        break
+st.set_page_config(page_title="Restaurant Queue Monitor", layout="wide")
+st.title("Live Queue Length")
 
-    # Run YOLO detection
+# Camera
+cap = cv2.VideoCapture(0)
+
+# Create CSV if not exists
+if not os.path.exists(csv_filename):
+    with open(csv_filename, mode="w", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(["People_in_Line"])
+
+# Auto-refresh every N seconds
+st_autorefresh(interval=snapshot_interval * 1000, key="queue_refresh")
+
+# Take one frame and update count
+ret, frame = cap.read()
+if ret:
     results = model(frame)
-
-    # Count people (class 0 = 'person')
     people_count = sum([1 for cls in results[0].boxes.cls if int(cls) == 0])
 
-    # Timestamp
-    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-
-    # Print and log to CSV
-    print(f"{timestamp} | People in line: {people_count}")
-    with open(csv_filename, mode='a', newline='') as file:
+    # Save to CSV
+    with open(csv_filename, mode="a", newline="") as file:
         writer = csv.writer(file)
-        writer.writerow([timestamp, people_count])
+        writer.writerow([people_count])
 
-    # Optional: display annotated frame
-    annotated_frame = results[0].plot()
-    cv2.imshow("YOLO Snapshot Detection", annotated_frame)
+    # Display big live number only
+    st.metric("People in Line", people_count)
 
-    # Wait until next snapshot
-    if cv2.waitKey(snapshot_interval * 1000) & 0xFF == ord("q"):
-        break
-
-# Release resources
+# Release camera when done
 cap.release()
-cv2.destroyAllWindows()
